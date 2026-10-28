@@ -1,475 +1,561 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="zh-TW">
 <head>
-    <meta charset="UTF-8">
-    <!-- 針對 iPad 及行動裝置優化：禁止縮放、鎖定檢視區 -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>iPad 專屬高質感貪食蛇遊戲</title>
-    <style>
-        /* CSS Reset 與 iPad 專屬防干涉設定 */
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            -webkit-user-select: none; /* 防止 iOS 文字與元素選取 */
-            user-select: none;
-            -webkit-touch-callout: none; /* 防止長按彈出選單 */
-        }
+  <meta charset="UTF-8" />
+  <!-- 針對行動裝置與 iPad 最佳化 Viewport：禁止縮放、支援瀏海全螢幕 (viewport-fit=cover) -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>iPad Retro Snake Game</title>
+  <style>
+    /* CSS 重設與防止 iOS 原生手勢干涉 */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent; /* 移除點擊時的灰色高亮框 */
+      -webkit-touch-callout: none;            /* 停用長按選單 */
+      -webkit-user-select: none;               /* 禁止選取文字以防彈出原生選取框 */
+      user-select: none;
+    }
 
-        html, body {
-            width: 100%;
-            height: 100%;
-            overflow: hidden; /* 絕對禁止全頁滾動條 */
-            background-color: #121212;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            color: #ffffff;
-            touch-action: none; /* 防止預設觸控手勢干擾 */
-        }
+    /* 鎖定全視窗滾動，杜絕 iPad 橡皮筋彈跳滾動 */
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none;                      /* 停用原生滾動與手勢放大 */
+      background-color: #0f172a;               /* 科技感深藍暗色底色 */
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      color: #f8fafc;
+    }
 
-        /* 響應式佈局容器：垂直彈性排列，確保畫面緊湊 */
-        .game-container {
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            align-items: center;
-            width: 100%;
-            height: 100%;
-            padding: env(safe-area-inset-top, 10px) 10px env(safe-area-inset-bottom, 10px) 10px;
-            max-width: 500px;
-            margin: 0 auto;
-        }
+    /* 主應用程式容器：使用 Flexbox 自動垂直分佈，確保不出滾動條 */
+    #app-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh;                         /* 支援動態視窗高度 */
+      padding: 12px 16px env(safe-area-inset-bottom, 16px) 16px;
+    }
 
-        /* 頂部計分板 */
-        .score-board {
-            display: flex;
-            justify-content: space-around;
-            width: 100%;
-            padding: 10px 0;
-            background: #1e1e1e;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        }
+    /* 頂部資訊列：分數與歷史最佳 */
+    header {
+      width: 100%;
+      max-width: 440px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 16px;
+      background: rgba(30, 41, 59, 0.7);
+      backdrop-filter: blur(8px);
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 1.1rem;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
 
-        .score-item {
-            text-align: center;
-        }
+    .score-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
 
-        .score-label {
-            font-size: 12px;
-            color: #888;
-            margin-bottom: 2px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
+    .score-value {
+      color: #38bdf8;
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+      font-size: 1.25rem;
+    }
 
-        .score-value {
-            font-size: 20px;
-            font-weight: bold;
-            color: #4CAF50;
-        }
+    /* 畫布包裝容器：保持正方形並確保在 iPad 橫/豎屏自動等比縮放 */
+    #canvas-wrapper {
+      position: relative;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex: 1;
+      width: 100%;
+      max-width: min(85vw, 55vh);
+      max-height: min(85vw, 55vh);
+      margin: 10px auto;
+    }
 
-        /* Canvas 畫布外框與置中 */
-        .canvas-wrapper {
-            position: relative;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            flex-grow: 1;
-            margin: 10px 0;
-            width: 100%;
-        }
+    /* 遊戲 Canvas：400x400 內部解析度，CSS 伸縮自適應 */
+    #game-canvas {
+      width: 100%;
+      height: 100%;
+      aspect-ratio: 1 / 1;
+      background-color: #020617;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 1px 1px rgba(255, 255, 255, 0.1);
+      display: block;
+    }
 
-        canvas {
-            background-color: #1a1a1a;
-            border: 3px solid #333;
-            border-radius: 8px;
-            box-shadow: 0 8px 16px rgba(0,0,0,0.5);
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
-        }
+    /* 遊戲結束提示浮層 */
+    #game-over-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(2, 6, 23, 0.85);
+      backdrop-filter: blur(4px);
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
 
-        /* 遊戲結束覆蓋層 */
-        .game-over-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.85);
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            border-radius: 8px;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.3s ease;
-        }
+    #game-over-overlay.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
 
-        .game-over-overlay.visible {
-            opacity: 1;
-            pointer-events: auto;
-        }
+    .overlay-title {
+      font-size: 1.8rem;
+      font-weight: 800;
+      color: #ef4444;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
 
-        .game-over-title {
-            font-size: 28px;
-            font-weight: bold;
-            color: #ff5252;
-            margin-bottom: 10px;
-        }
+    .overlay-desc {
+      font-size: 0.95rem;
+      color: #94a3b8;
+    }
 
-        .game-over-text {
-            font-size: 16px;
-            color: #ccc;
-            margin-bottom: 20px;
-        }
+    /* 底部控制區域：放置操作按鈕與虛擬方向鍵 */
+    #controls-container {
+      width: 100%;
+      max-width: 440px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
 
-        /* iPad 虛擬 D-Pad 按鍵區 */
-        .controls-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            width: 100%;
-            padding-bottom: 10px;
-        }
+    /* 輔助按鈕列（開始 / 重新開始） */
+    .action-row {
+      display: flex;
+      justify-content: center;
+      width: 100%;
+    }
 
-        .dpad {
-            position: relative;
-            width: 200px;
-            height: 200px;
-        }
+    .action-btn {
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      color: #ffffff;
+      border: none;
+      outline: none;
+      padding: 10px 24px;
+      font-size: 1rem;
+      font-weight: 600;
+      border-radius: 20px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+      transition: transform 0.1s ease, filter 0.1s ease;
+    }
 
-        .dpad-btn {
-            position: absolute;
-            background-color: #2a2a2a;
-            color: #fff;
-            border: 2px solid #444;
-            border-radius: 14px;
-            font-size: 24px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            cursor: pointer;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-            transition: background-color 0.1s, transform 0.1s;
-        }
+    .action-btn:active {
+      transform: scale(0.96);
+      filter: brightness(0.9);
+    }
 
-        /* 點擊時的視覺回饋與防按壓偏移 */
-        .dpad-btn:active, .btn-primary:active {
-            background-color: #4CAF50;
-            transform: scale(0.95);
-        }
+    /* 虛擬十字鍵 (D-Pad) 3x3 Grid 佈局 */
+    .d-pad {
+      display: grid;
+      grid-template-columns: repeat(3, 72px);
+      grid-template-rows: repeat(3, 64px);
+      gap: 8px;
+      justify-content: center;
+      align-items: center;
+      margin-bottom: 4px;
+    }
 
-        .btn-up { top: 0; left: 60px; width: 80px; height: 60px; }
-        .btn-down { bottom: 0; left: 60px; width: 80px; height: 60px; }
-        .btn-left { top: 60px; left: 0; width: 60px; height: 80px; }
-        .btn-right { top: 60px; right: 0; width: 60px; height: 80px; }
-        .btn-center { top: 60px; left: 60px; width: 80px; height: 80px; background: #1a1a1a; border: none; box-shadow: none; font-size: 12px; color: #666; }
+    /* 方向鍵按鈕通用外觀：適合 iPad 大拇指觸控 */
+    .d-btn {
+      background: #1e293b;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 1.5rem;
+      color: #f1f5f9;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
+      cursor: pointer;
+      touch-action: none;
+      transition: transform 0.08s ease, background-color 0.08s ease;
+    }
 
-        /* 開始/重新開始通用按鈕 */
-        .btn-primary {
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            padding: 12px 30px;
-            font-size: 18px;
-            font-weight: bold;
-            border-radius: 8px;
-            cursor: pointer;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        }
-    </style>
+    /* 觸控按下回饋 */
+    .d-btn:active, .d-btn.active-touch {
+      background-color: #334155;
+      transform: scale(0.92);
+      border-color: #38bdf8;
+    }
+
+    /* D-Pad 按鍵位置分佈 */
+    #btn-up    { grid-column: 2; grid-row: 1; }
+    #btn-left  { grid-column: 1; grid-row: 2; }
+    #btn-center{ grid-column: 2; grid-row: 2; background: transparent; border: none; box-shadow: none; pointer-events: none; }
+    #btn-right { grid-column: 3; grid-row: 2; }
+    #btn-down  { grid-column: 2; grid-row: 3; }
+  </style>
 </head>
 <body>
-    <div class="game-container">
-        <!-- 頂部計分板 -->
-        <div class="score-board">
-            <div class="score-item">
-                <div class="score-label">分數</div>
-                <div id="current-score" class="score-value">0</div>
-            </div>
-            <div class="score-item">
-                <div class="score-label">最高分</div>
-                <div id="high-score" class="score-value">0</div>
-            </div>
-        </div>
 
-        <!-- 遊戲畫布與結束覆蓋層 -->
-        <div class="canvas-wrapper">
-            <canvas id="gameCanvas" width="400" height="400"></canvas>
-            
-            <div id="gameOverOverlay" class="game-over-overlay">
-                <div class="game-over-title">遊戲結束</div>
-                <div id="finalScoreText" class="game-over-text">得分: 0</div>
-                <button id="restartBtn" class="btn-primary">再玩一次</button>
-            </div>
-        </div>
+  <div id="app-container">
+    <!-- 頂部分數欄 -->
+    <header>
+      <div class="score-badge">分數: <span id="current-score" class="score-value">0</span></div>
+      <div class="score-badge">最高紀錄: <span id="high-score" class="score-value">0</span></div>
+    </header>
 
-        <!-- 底部 iPad 專用觸控虛擬方向鍵 -->
-        <div class="controls-container">
-            <div class="dpad">
-                <button class="dpad-btn btn-up" data-dir="UP">▲</button>
-                <button class="dpad-btn btn-left" data-dir="LEFT">◀</button>
-                <button class="dpad-btn btn-center">iPad</button>
-                <button class="dpad-btn btn-right" data-dir="RIGHT">▶</button>
-                <button class="dpad-btn btn-down" data-dir="DOWN">▼</button>
-            </div>
-        </div>
+    <!-- 遊戲畫布與結束覆蓋層 -->
+    <div id="canvas-wrapper">
+      <canvas id="game-canvas" width="400" height="400"></canvas>
+      <div id="game-over-overlay">
+        <div class="overlay-title">遊戲結束</div>
+        <div class="overlay-desc">點擊下方按鈕或按空格鍵重試</div>
+      </div>
     </div>
 
-    <script>
-        // ==========================================
-        // 1. 遊戲常數與全域變數定義
-        // ==========================================
-        const CANVAS_SIZE = 400;     // 畫布總像素寬高
-        const GRID_COUNT = 20;       // 網格總數 (20x20)
-        const TILE_SIZE = CANVAS_SIZE / GRID_COUNT; // 每個格子的大小 (20px)
-        const GAME_SPEED = 120;      // 遊戲迴圈更新間隔 (毫秒)
+    <!-- 底部觸控控制器 -->
+    <div id="controls-container">
+      <div class="action-row">
+        <button id="btn-restart" class="action-btn">開始遊戲</button>
+      </div>
 
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        const currentScoreEl = document.getElementById('current-score');
-        const highScoreEl = document.getElementById('high-score');
-        const gameOverOverlay = document.getElementById('gameOverOverlay');
-        const finalScoreText = document.getElementById('finalScoreText');
-        const restartBtn = document.getElementById('restartBtn');
+      <!-- 虛擬方向鍵 D-Pad -->
+      <div class="d-pad">
+        <button id="btn-up" class="d-btn" aria-label="上">▲</button>
+        <button id="btn-left" class="d-btn" aria-label="左">◀</button>
+        <div id="btn-center"></div>
+        <button id="btn-right" class="d-btn" aria-label="右">▶</button>
+        <button id="btn-down" class="d-btn" aria-label="下">▼</button>
+      </div>
+    </div>
+  </div>
 
-        // 遊戲狀態變數
-        let snake = [];
-        let food = { x: 0, y: 0 };
-        let dx = 1; // X 軸移動方向 (-1:左, 1:右, 0:靜止)
-        let dy = 0; // Y 軸移動方向 (-1:上, 1:下, 0:靜止)
-        let nextDx = 1; // 緩衝下一次方向，防止快速點擊導致原地自殺
-        let nextDy = 0;
-        let score = 0;
-        let highScore = localStorage.getItem('snake_highscore') || 0;
-        let isGameRunning = false;
-        let gameInterval = null;
+  <script>
+    /**
+     * iPad 貪食蛇遊戲核心邏輯
+     */
+    // 1. 遊戲核心常數設定
+    const GRID_SIZE = 20;               // 每個網格邏輯像素大小 (20x20)
+    const TILE_COUNT = 20;              // 寬度與高度網格數 (20 * 20 = 400 像素解析度)
+    const GAME_STEP_INTERVAL = 100;     // 蛇移動頻率：每 100 毫秒執行一次更新
 
-        // 初始化最高分顯示
-        highScoreEl.textContent = highScore;
+    // 2. DOM 元素參考
+    const canvas = document.getElementById('game-canvas');
+    const ctx = canvas.getContext('2d');
+    const currentScoreEl = document.getElementById('current-score');
+    const highScoreEl = document.getElementById('high-score');
+    const restartBtn = document.getElementById('btn-restart');
+    const gameOverOverlay = document.getElementById('game-over-overlay');
 
-        // ==========================================
-        // 2. 遊戲初始化與重置
-        // ==========================================
-        function initGame() {
-            // 初始化蛇身：長度 3，置於畫布中央
-            snake = [
-                { x: 10, y: 10 },
-                { x: 9, y: 10 },
-                { x: 8, y: 10 }
-            ];
-            score = 0;
-            currentScoreEl.textContent = score;
-            dx = 1;
-            dy = 0;
-            nextDx = 1;
-            nextDy = 0;
-            
-            spawnFood();
-            gameOverOverlay.classList.remove('visible');
-            isGameRunning = true;
+    const btnUp = document.getElementById('btn-up');
+    const btnDown = document.getElementById('btn-down');
+    const btnLeft = document.getElementById('btn-left');
+    const btnRight = document.getElementById('btn-right');
 
-            // 啟動遊戲循環
-            if (gameInterval) clearInterval(gameInterval);
-            gameInterval = setInterval(gameLoop, GAME_SPEED);
+    // 3. 遊戲狀態變數
+    let snake = [];                     // 蛇身陣列，index 0 為蛇頭 [{x, y}, ...]
+    let food = { x: 0, y: 0 };          // 食物座標
+    let currentDir = { x: 0, y: 0 };    // 當前實際前進方向向量
+    let nextDir = { x: 0, y: 0 };       // 緩衝區中的下一次轉向向量（防自殺機制）
+    let score = 0;
+    let highScore = 0;
+    let isGameOver = false;
+    let isGameRunning = false;
+    let lastStepTime = 0;
+    let animationFrameId = null;
+
+    /**
+     * 重設與初始化遊戲狀態
+     */
+    function initGame() {
+      // 初始蛇身長度為 3，置中並朝右移動
+      snake = [
+        { x: 10, y: 10 },
+        { x: 9, y: 10 },
+        { x: 8, y: 10 }
+      ];
+      currentDir = { x: 1, y: 0 };
+      nextDir = { x: 1, y: 0 };
+      score = 0;
+      isGameOver = false;
+      isGameRunning = true;
+      currentScoreEl.textContent = '0';
+      gameOverOverlay.classList.remove('visible');
+      restartBtn.textContent = '重新開始';
+
+      spawnFood();
+      lastStepTime = performance.now();
+
+      if (!animationFrameId) {
+        animationFrameId = requestAnimationFrame(gameLoop);
+      }
+    }
+
+    /**
+     * 生成隨機食物，確保不與當前蛇身重疊
+     */
+    function spawnFood() {
+      let valid = false;
+      let newFood = { x: 0, y: 0 };
+      while (!valid) {
+        newFood.x = Math.floor(Math.random() * TILE_COUNT);
+        newFood.y = Math.floor(Math.random() * TILE_COUNT);
+        // 檢查是否與任何一段蛇身相撞
+        valid = !snake.some(segment => segment.x === newFood.x && segment.y === newFood.y);
+      }
+      food = newFood;
+    }
+
+    /**
+     * 安全轉向設定（防自殺與同一禎連續快速轉向機制）
+     * 當蛇向右走時，禁止直接按左自殺；必須轉為上下方。
+     */
+    function setDirection(dx, dy) {
+      if (!isGameRunning || isGameOver) return;
+      // 避免反向逆行碰撞
+      if (dx !== 0 && currentDir.x === -dx) return;
+      if (dy !== 0 && currentDir.y === -dy) return;
+      // 避免同一禎內連續觸發無效方向
+      if (dx !== 0 && currentDir.x !== 0) return;
+      if (dy !== 0 && currentDir.y !== 0) return;
+
+      nextDir = { x: dx, y: dy };
+    }
+
+    /**
+     * 貪食蛇單步邏輯更新
+     */
+    function update() {
+      if (isGameOver || !isGameRunning) return;
+
+      // 採納緩衝區方向
+      currentDir = { ...nextDir };
+
+      // 計算蛇頭新位置
+      const newHead = {
+        x: snake[0].x + currentDir.x,
+        y: snake[0].y + currentDir.y
+      };
+
+      // 撞牆判定 (400x400 / 20 = 邊界 0 到 19)
+      if (newHead.x < 0 || newHead.x >= TILE_COUNT || newHead.y < 0 || newHead.y >= TILE_COUNT) {
+        handleGameOver();
+        return;
+      }
+
+      // 撞擊自身身體判定
+      const hitSelf = snake.some(segment => segment.x === newHead.x && segment.y === newHead.y);
+      if (hitSelf) {
+        handleGameOver();
+        return;
+      }
+
+      // 蛇頭往前推進
+      snake.unshift(newHead);
+
+      // 判定是否吃到食物
+      if (newHead.x === food.x && newHead.y === food.y) {
+        score += 10;
+        currentScoreEl.textContent = score;
+        if (score > highScore) {
+          highScore = score;
+          highScoreEl.textContent = highScore;
         }
+        spawnFood();
+        // 吃到食物不 pop，蛇身長度加 1
+      } else {
+        // 未吃到食物則移除蛇尾維持原長度
+        snake.pop();
+      }
+    }
 
-        // ==========================================
-        // 3. 食物生成邏輯
-        // ==========================================
-        function spawnFood() {
-            let valid = false;
-            while (!valid) {
-                food.x = Math.floor(Math.random() * GRID_COUNT);
-                food.y = Math.floor(Math.random() * GRID_COUNT);
+    /**
+     * 遊戲結束處理
+     */
+    function handleGameOver() {
+      isGameOver = true;
+      isGameRunning = false;
+      gameOverOverlay.classList.add('visible');
+      restartBtn.textContent = '再來一局';
+    }
 
-                // 確保食物不會隨機生成在蛇身上
-                valid = !snake.some(segment => segment.x === food.x && segment.y === food.y);
-            }
+    /**
+     * 渲染繪製畫面（暗色系風格、留 1px 格隙、食物圓形光澤感）
+     */
+    function render() {
+      // 1. 清空畫布並繪製深色背景
+      ctx.fillStyle = '#020617';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // 2. 繪製微弱的背景格線（提升視覺科技精緻度）
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= TILE_COUNT; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i * GRID_SIZE, 0);
+        ctx.lineTo(i * GRID_SIZE, canvas.height);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(0, i * GRID_SIZE);
+        ctx.lineTo(canvas.width, i * GRID_SIZE);
+        ctx.stroke();
+      }
+
+      // 3. 繪製食物（高對比亮紅色圓形並保留邊界隙縫）
+      const foodCenterX = food.x * GRID_SIZE + GRID_SIZE / 2;
+      const foodCenterY = food.y * GRID_SIZE + GRID_SIZE / 2;
+      const foodRadius = (GRID_SIZE - 2) / 2;
+
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath();
+      ctx.arc(foodCenterX, foodCenterY, foodRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 4. 繪製蛇身（蛇頭為亮翠綠，蛇身為健康綠色，留 1 像素隙縫）
+      snake.forEach((segment, index) => {
+        const isHead = index === 0;
+        ctx.fillStyle = isHead ? '#10b981' : '#22c55e';
+
+        // 每個網格保留 1px 間隔以體現復古網格質感
+        const x = segment.x * GRID_SIZE + 1;
+        const y = segment.y * GRID_SIZE + 1;
+        const size = GRID_SIZE - 2;
+
+        ctx.fillRect(x, y, size, size);
+
+        // 為蛇頭繪製雙眼，增強朝向辨識度
+        if (isHead) {
+          ctx.fillStyle = '#022c22';
+          const eyeSize = 2.5;
+          let eye1 = { x: x + 4, y: y + 4 };
+          let eye2 = { x: x + 12, y: y + 4 };
+
+          if (currentDir.x === 1) { // 向右
+            eye1 = { x: x + 12, y: y + 4 };
+            eye2 = { x: x + 12, y: y + 12 };
+          } else if (currentDir.x === -1) { // 向左
+            eye1 = { x: x + 4, y: y + 4 };
+            eye2 = { x: x + 4, y: y + 12 };
+          } else if (currentDir.y === 1) { // 向下
+            eye1 = { x: x + 4, y: y + 12 };
+            eye2 = { x: x + 12, y: y + 12 };
+          }
+          ctx.fillRect(eye1.x, eye1.y, eyeSize, eyeSize);
+          ctx.fillRect(eye2.x, eye2.y, eyeSize, eyeSize);
         }
+      });
+    }
 
-        // ==========================================
-        // 4. 核心遊戲循環 (Game Loop)
-        // ==========================================
-        function gameLoop() {
-            update();
-            if (isGameRunning) {
-                draw();
-            }
-        }
+    /**
+     * 高精度 Game Loop（基於 requestAnimationFrame 與 100ms 節拍）
+     */
+    function gameLoop(timestamp) {
+      if (!lastStepTime) lastStepTime = timestamp;
+      const elapsed = timestamp - lastStepTime;
 
-        // ==========================================
-        // 5. 遊戲狀態更新與碰撞檢測
-        // ==========================================
-        function update() {
-            // 套用方向緩衝區，確保每格移動只轉向一次
-            dx = nextDx;
-            dy = nextDy;
+      if (elapsed >= GAME_STEP_INTERVAL) {
+        lastStepTime = timestamp - (elapsed % GAME_STEP_INTERVAL);
+        update();
+      }
 
-            // 計算新的蛇頭位置
-            const head = { x: snake[0].x + dx, y: snake[0].y + dy };
+      render();
+      animationFrameId = requestAnimationFrame(gameLoop);
+    }
 
-            // 撞牆檢測 (超出 0 ~ GRID_COUNT-1 範圍即死亡)
-            if (head.x < 0 || head.x >= GRID_COUNT || head.y < 0 || head.y >= GRID_COUNT) {
-                gameOver();
-                return;
-            }
+    /**
+     * 核心關鍵：綁定無延遲觸控與按鍵點擊
+     * iPad iOS Safari 必須使用 touchstart 且呼叫 e.preventDefault()，杜絕點擊延遲與頁面縮放
+     */
+    function bindInstantTouch(element, callback) {
+      // 觸控事件優先
+      element.addEventListener('touchstart', (e) => {
+        e.preventDefault(); // 杜絕 iOS 雙擊放大與文字選取
+        element.classList.add('active-touch');
+        callback();
+      }, { passive: false });
 
-            // 撞自身檢測
-            if (snake.some(segment => segment.x === head.x && segment.y === head.y)) {
-                gameOver();
-                return;
-            }
+      element.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        element.classList.remove('active-touch');
+      }, { passive: false });
 
-            // 將新頭部插入蛇身陣列前端
-            snake.unshift(head);
+      element.addEventListener('touchcancel', () => {
+        element.classList.remove('active-touch');
+      });
 
-            // 檢測是否吃到食物
-            if (head.x === food.x && head.y === food.y) {
-                score += 10;
-                currentScoreEl.textContent = score;
-                
-                // 更新最高分
-                if (score > highScore) {
-                    highScore = score;
-                    highScoreEl.textContent = highScore;
-                    localStorage.setItem('snake_highscore', highScore);
-                }
-                spawnFood();
-            } else {
-                // 若沒吃到食物，移除蛇尾以維持長度
-                snake.pop();
-            }
-        }
+      // 支援桌面滑鼠點擊
+      element.addEventListener('click', (e) => {
+        callback();
+      });
+    }
 
-        // ==========================================
-        // 6. 畫面渲染系統 (Canvas 繪圖)
-        // ==========================================
-        function draw() {
-            // 清空畫布背景
-            ctx.fillStyle = '#1a1a1a';
-            ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+    // 綁定虛擬方向鍵（上、下、左、右）
+    bindInstantTouch(btnUp, () => setDirection(0, -1));
+    bindInstantTouch(btnDown, () => setDirection(0, 1));
+    bindInstantTouch(btnLeft, () => setDirection(-1, 0));
+    bindInstantTouch(btnRight, () => setDirection(1, 0));
 
-            // 繪製格線 (增加視覺精緻度，每個方塊留 1px 隙縫)
-            ctx.fillStyle = '#222222';
-            for (let i = 0; i < GRID_COUNT; i++) {
-                for (let j = 0; j < GRID_COUNT; j++) {
-                    ctx.fillRect(i * TILE_SIZE + 1, j * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
-                }
-            }
+    // 綁定重新開始按鈕
+    bindInstantTouch(restartBtn, () => {
+      initGame();
+    });
 
-            // 繪製食物 (紅色圓形)
-            ctx.fillStyle = '#ff5252';
-            ctx.beginPath();
-            ctx.arc(
-                food.x * TILE_SIZE + TILE_SIZE / 2,
-                food.y * TILE_SIZE + TILE_SIZE / 2,
-                TILE_SIZE / 2 - 2,
-                0,
-                Math.PI * 2
-            );
-            ctx.fill();
+    // 支援實體鍵盤（方向鍵與 WASD 及空格鍵重開），方便除錯與外接鍵盤體驗
+    window.addEventListener('keydown', (e) => {
+      switch (e.key) {
+        case 'ArrowUp':
+        case 'w':
+        case 'W':
+          e.preventDefault();
+          setDirection(0, -1);
+          break;
+        case 'ArrowDown':
+        case 's':
+        case 'S':
+          e.preventDefault();
+          setDirection(0, 1);
+          break;
+        case 'ArrowLeft':
+        case 'a':
+        case 'A':
+          e.preventDefault();
+          setDirection(-1, 0);
+          break;
+        case 'ArrowRight':
+        case 'd':
+        case 'D':
+          e.preventDefault();
+          setDirection(1, 0);
+          break;
+        case ' ': // 空格鍵直接重新開始
+          e.preventDefault();
+          initGame();
+          break;
+      }
+    });
 
-            // 繪製蛇身與蛇頭
-            snake.forEach((segment, index) => {
-                // 蛇頭用深綠色/亮綠色區隔，蛇身用一般綠色
-                ctx.fillStyle = index === 0 ? '#2E7D32' : '#4CAF50';
-                ctx.fillRect(
-                    segment.x * TILE_SIZE + 1,
-                    segment.y * TILE_SIZE + 1,
-                    TILE_SIZE - 2,
-                    TILE_SIZE - 2
-                );
-            });
-        }
+    // 防止 iPad 雙指手勢或滾動拖曳
+    document.addEventListener('gesturestart', (e) => e.preventDefault());
+    document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
 
-        // ==========================================
-        // 7. 遊戲結束處理
-        // ==========================================
-        function gameOver() {
-            isGameRunning = false;
-            clearInterval(gameInterval);
-            finalScoreText.textContent = `最終得分: ${score}`;
-            gameOverOverlay.classList.add('visible');
-        }
-
-        // ==========================================
-        // 8. 輸入控制系統 (觸控與鍵盤備援 + 防自殺轉向)
-        // ==========================================
-        function changeDirection(dir) {
-            if (!isGameRunning) return;
-
-            // 防自殺機制：當向右移動時，不允許直接轉向左側
-            if (dir === 'UP' && dy === 0) {
-                nextDx = 0; nextDy = -1;
-            } else if (dir === 'DOWN' && dy === 0) {
-                nextDx = 0; nextDy = 1;
-            } else if (dir === 'LEFT' && dx === 0) {
-                nextDx = -1; nextDy = 0;
-            } else if (dir === 'RIGHT' && dx === 0) {
-                nextDx = 1; nextDy = 0;
-            }
-        }
-
-        // 綁定 iPad 虛擬 D-Pad 觸控事件 (使用 touchstart + e.preventDefault 消除 iOS 延遲)
-        const dpadButtons = document.querySelectorAll('.dpad-btn[data-dir]');
-        dpadButtons.forEach(btn => {
-            btn.addEventListener('touchstart', (e) => {
-                e.preventDefault(); // 防止 iOS 雙擊放大與滾動
-                const dir = btn.getAttribute('data-dir');
-                changeDirection(dir);
-            }, { passive: false });
-
-            // 同時支援滑鼠點擊 (方便桌機模擬測試)
-            btn.addEventListener('click', () => {
-                const dir = btn.getAttribute('data-dir');
-                changeDirection(dir);
-            });
-        });
-
-        // 重新開始按鈕事件
-        restartBtn.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            initGame();
-        }, { passive: false });
-
-        restartBtn.addEventListener('click', () => {
-            initGame();
-        });
-
-        // 鍵盤備援控制 (支援方向鍵與 WASD)
-        window.addEventListener('keydown', (e) => {
-            switch (e.key) {
-                case 'ArrowUp':
-                case 'w':
-                case 'W':
-                    changeDirection('UP');
-                    break;
-                case 'ArrowDown':
-                case 's':
-                case 'S':
-                    changeDirection('DOWN');
-                    break;
-                case 'ArrowLeft':
-                case 'a':
-                case 'A':
-                    changeDirection('LEFT');
-                    break;
-                case 'ArrowRight':
-                case 'd':
-                case 'D':
-                    changeDirection('RIGHT');
-                    break;
-            }
-        });
-
-        // ==========================================
-        // 9. 啟動遊戲初始狀態
-        // ==========================================
-        initGame();
-    </script>
+    // 頁面載入後自動啟動初始狀態
+    initGame();
+  </script>
 </body>
 </html>
