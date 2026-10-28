@@ -1,561 +1,250 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-  <meta charset="UTF-8" />
-  <!-- 針對行動裝置與 iPad 最佳化 Viewport：禁止縮放、支援瀏海全螢幕 (viewport-fit=cover) -->
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <title>iPad Retro Snake Game</title>
-  <style>
-    /* CSS 重設與防止 iOS 原生手勢干涉 */
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      -webkit-tap-highlight-color: transparent; /* 移除點擊時的灰色高亮框 */
-      -webkit-touch-callout: none;            /* 停用長按選單 */
-      -webkit-user-select: none;               /* 禁止選取文字以防彈出原生選取框 */
-      user-select: none;
-    }
+<html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Agent Harness</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>:root{color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html,body{height:100%;margin:0;background:#09090b;color:#e4e4e7;font-family:Inter,-apple-system,"PingFang TC","Noto Sans TC",system-ui,sans-serif;-webkit-font-smoothing:antialiased}#root{height:100%}button{touch-action:manipulation;font-family:inherit}.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}textarea,input,select{font-family:inherit}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-thumb{background:#27272a;border-radius:3px}</style>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+</head><body><div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef}=React;
+const CAP=25,KEY="harness_v1";
+const SYS={
+Planner:"你是 Planner。只負責規格與拆票，不寫實作。輸出 JSON 陣列：[{\"title\":\"…\",\"acceptance\":\"…\"}]，每張票必須小到可單一 Session 完成。",
+Builder:"你是 Builder。一次只處理唯一的 Active 任務，輸出實作方案或程式碼與自我檢查清單。禁止宣稱任務已通過，驗收權在 Evaluator。",
+Evaluator:"你是挑剔的 Skeptical QA。對照 SPEC.md 與驗收條件找出邊界漏洞。第一行必須是 VERDICT: PASS 或 VERDICT: FAIL，之後給出驗證報告。"};
+const AGENTS0=`# AGENTS.md
+## 鐵律
+1. WIP=1：同一時間最多一個 active 任務。
+2. Builder 不得自行標記 passing，必須由 Evaluator 回傳 PASS。
+3. 每任務步數上限 25，逼近上限必須交接。
+4. 結束或中斷前，必須寫入 progress.md。
+## 角色
+Planner 拆票 / Builder 單任務實作 / Evaluator 懷疑論驗收`;
+const SPEC0=`# SPEC.md
+（尚未定義。在下方輸入需求交給 Planner 拆票，或直接在這裡編輯。）`;
+const DEF={files:{agents:AGENTS0,spec:SPEC0,progress:"# progress.md\n（交接日誌）\n",decisions:"# DECISIONS.md\n- ADR-001：狀態存 localStorage，可匯出 JSON。\n"},
+features:[],
+cfg:{providers:{gemini:{key:""},openai:{url:"https://openrouter.ai/api/v1",key:"",headers:"{}"},bridge:{url:"http://100.x.x.x:8321/v1",key:"",headers:"{}",sticky:true}},
+roles:{Planner:{provider:"gemini_api",model:"gemini-2.5-pro"},Builder:{provider:"gemini_api",model:"gemini-2.5-flash"},Evaluator:{provider:"gemini_api",model:"gemini-2.5-pro"}},mode:"standalone"}};
+function load(){try{const s=localStorage.getItem(KEY);if(s)return JSON.parse(s)}catch(e){}return JSON.parse(JSON.stringify(DEF))}
+const DOT={not_started:"bg-zinc-500",active:"bg-indigo-400",passing:"bg-emerald-400",blocked:"bg-rose-400"};
+const TAGDOT={"Context Injected":"bg-sky-400","Model Proposes":"bg-violet-400","Harness Gate Check":"bg-amber-400","QA Verification":"bg-emerald-400"};
+const COLS=[["not_started","待辦"],["active","進行中"],["blocked","封鎖"],["passing","已通過"]];
+const FILES=[["agents","AGENTS.md"],["spec","SPEC.md"],["feature_list","feature_list.json"],["progress","progress.md"],["decisions","DECISIONS.md"]];
+const STAGES=["啟動","實作","驗收","通過"];
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function post(u,o){let r;for(let i=0;i<3;i++){r=await fetch(u,o);if(r.status!==503&&r.status!==429)return r;await sleep(1500*(i+1))}return r}
+const card="bg-[#111113] border border-[#1f1f23] rounded-xl";
+const inp="w-full bg-[#09090b] border border-[#27272a] rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:border-indigo-400";
+const lbl="text-[11px] uppercase tracking-wider text-zinc-500";
 
-    /* 鎖定全視窗滾動，杜絕 iPad 橡皮筋彈跳滾動 */
-    html, body {
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      touch-action: none;                      /* 停用原生滾動與手勢放大 */
-      background-color: #0f172a;               /* 科技感深藍暗色底色 */
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      color: #f8fafc;
-    }
+function App(){
+const [S,setS]=useState(load);const SR=useRef(S);SR.current=S;const tok=useRef(0);const simFlag=useRef(false);
+const [log,setLog]=useState([]);const [sess,setSess]=useState({role:"idle",tokens:0});
+const [busy,setBusy]=useState(false);const [auto,setAuto]=useState(false);const [autoStep,setAutoStep]=useState("");const [tab,setTab]=useState("agents");const [view,setView]=useState("run");
+const [raw,setRaw]=useState("");const [req,setReq]=useState("");
+const [right,setRight]=useState(false);const [modal,setModal]=useState(null);const [mtext,setMtext]=useState("");
+const [pv,setPv]=useState("Builder");const endRef=useRef(null);
+useEffect(()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}},[S]);
+useEffect(()=>{endRef.current&&endRef.current.scrollIntoView({behavior:"smooth"})},[log]);
+useEffect(()=>{setRaw(JSON.stringify(S.features,null,2))},[S.features,view,tab]);
+const act=S.features.find(f=>f.status==="active");
+const L=(tag,text)=>setLog(l=>[...l,{tag,text}]);
+const setFiles=(k,v)=>setS(s=>({...s,files:{...s.files,[k]:v}}));
+const setCfg=fn=>setS(s=>{const c=JSON.parse(JSON.stringify(s.cfg));fn(c);return {...s,cfg:c}});
+const patch=(id,p)=>{setS(s=>({...s,features:s.features.map(f=>f.id===id?{...f,...p}:f)}));SR.current={...SR.current,features:SR.current.features.map(f=>f.id===id?{...f,...p}:f)}};
+const addProgress=t=>setS(s=>({...s,files:{...s.files,progress:s.files.progress+"\n"+t}}));
 
-    /* 主應用程式容器：使用 Flexbox 自動垂直分佈，確保不出滾動條 */
-    #app-container {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: space-between;
-      width: 100vw;
-      height: 100vh;
-      height: 100dvh;                         /* 支援動態視窗高度 */
-      padding: 12px 16px env(safe-area-inset-bottom, 16px) 16px;
-    }
+function start(id){
+  if(SR.current.features.some(f=>f.status==="active")){L("Harness Gate Check","拒絕：WIP=1 鎖定中，已有 active 任務，無法啟動 "+id);return false}
+  patch(id,{status:"active"});L("Harness Gate Check","通過：#"+id+" 轉為 active，WIP=1 已鎖定");return true}
+function ctxText(role){
+  const s=SR.current,a=s.features.find(f=>f.status==="active");
+  return "## AGENTS.md\n"+s.files.agents+"\n\n## SPEC.md\n"+s.files.spec+"\n\n## progress.md（最近）\n"+s.files.progress.slice(-1200)+"\n\n## Active Feature\n"+(a?JSON.stringify({id:a.id,title:a.title,acceptance:a.acceptance,builderOutput:role==="Evaluator"?a.builderOut:undefined},null,1):"（無）")}
+function sim(role,prompt,why){
+  if(role==="Planner")return JSON.stringify([{title:"定義資料結構與儲存層",acceptance:"讀寫與壞資料回復皆有測試"},{title:"核心流程實作",acceptance:"主要操作可完成且無例外"},{title:"統計與設定頁",acceptance:"畫面符合 SPEC.md"}]);
+  if(role==="Builder"){const a=SR.current.features.find(f=>f.status==="active");return "【模擬 Builder】任務："+(a?a.title:"")+"\n1. 建立模組與型別\n2. 實作主流程與錯誤處理\n3. 自我檢查：邊界值、空資料、重新整理後狀態\n（"+(why||"模擬")+"）"}
+  return "VERDICT: PASS\n【模擬 QA】已對照 SPEC.md 與驗收條件：邊界值、空資料、持久化皆有處理。（"+(why||"模擬")+"）"}
+function thinkCfg(model,lv){
+  if(!lv)return null;
+  if(/gemini-2\.5/.test(model)){const m={minimal:/pro/.test(model)?128:0,low:1024,medium:8192,high:24576};return {thinkingBudget:m[lv]}}
+  return {thinkingLevel:lv}}
+async function call(role,prompt){
+  const c=SR.current.cfg,a=c.roles[role],p=c.providers;
+  L("Context Injected",role+" → "+a.provider+" / "+a.model);simFlag.current=false;setSess(x=>({...x,role}));
+  const sys=SYS[role]+"\n\n"+ctxText(role);let out;
+  try{
+    if(a.provider==="gemini_api"){
+      if(!p.gemini.key){await sleep(700);out=sim(role,prompt,"未填 API Key，模擬回退")}
+      else{const tc=thinkCfg(a.model,a.think);const u="https://generativelanguage.googleapis.com/v1beta/models/"+a.model+":generateContent";
+        const mk=t=>({method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":p.gemini.key},body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:"user",parts:[{text:prompt}]}],...(t?{generationConfig:{thinkingConfig:t}}:{})})});
+        let r=await post(u,mk(tc));
+        let j=await r.json();if(!r.ok&&tc&&/think|budget|level/i.test(JSON.stringify(j))){L("Harness Gate Check","警告：此模型不支援所選思考程度，改用預設再試一次");r=await post(u,mk(null));j=await r.json()}
+        if(!r.ok)throw new Error(j.error&&j.error.message||r.status);const pick=jj=>{const c=jj.candidates&&jj.candidates[0];return {t:c&&c.content&&c.content.parts?c.content.parts.map(x=>x.text||"").join(""):"",why:(c&&c.finishReason)||(jj.promptFeedback&&jj.promptFeedback.blockReason)||"未知"}};
+        let g=pick(j);
+        if(!g.t.trim()){L("Harness Gate Check","警告：模型回傳空內容（"+g.why+"），提高輸出上限並降低思考後重試一次");
+          const r2=await post(u,{...mk(null),body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:"user",parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:16384,thinkingConfig:thinkCfg(a.model,"low")}})});
+          g=pick(await r2.json())}
+        out=g.t}
+    }else{
+      const q=a.provider==="openai_compatible"?p.openai:p.bridge;
+      if(!q.url){await sleep(700);out=sim(role,prompt,"未設定 URL，模擬回退")}
+      else{let h={"Content-Type":"application/json"};if(q.key)h.Authorization="Bearer "+q.key;try{h={...h,...JSON.parse(q.headers||"{}")}}catch(e){}
+        if(a.provider==="subscription_bridge"&&q.sticky)h["X-Sticky-Session"]="1";
+        const u2=q.url.replace(/\/$/,"")+"/chat/completions";const ef=a.think==="minimal"?"low":a.think;
+        const mk2=e=>({method:"POST",headers:h,body:JSON.stringify({model:a.model,messages:[{role:"system",content:sys},{role:"user",content:prompt}],...(e?{reasoning_effort:e}:{})})});
+        let r=await post(u2,mk2(ef));
+        let j=await r.json();if(!r.ok&&ef&&/reason|effort/i.test(JSON.stringify(j))){L("Harness Gate Check","警告：此端點不支援所選思考程度，改用預設再試一次");r=await post(u2,mk2(null));j=await r.json()}
+        if(!r.ok)throw new Error(JSON.stringify(j).slice(0,200));out=j.choices[0].message.content}}
+  }catch(e){L("Harness Gate Check","警告：API 呼叫失敗（"+e.message+"），改用模擬回退");simFlag.current=true;await sleep(400);out=sim(role,prompt,"API 失敗回退")}
+  tok.current=Math.round((sys.length+prompt.length+out.length)/4);setSess(x=>({...x,tokens:x.tokens+tok.current}));
+  return out}
 
-    /* 頂部資訊列：分數與歷史最佳 */
-    header {
-      width: 100%;
-      max-width: 440px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 16px;
-      background: rgba(30, 41, 59, 0.7);
-      backdrop-filter: blur(8px);
-      border-radius: 12px;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      font-size: 1.1rem;
-      font-weight: 600;
-      letter-spacing: 0.5px;
-    }
+async function runPlanner(){
+  if(busy)return false;let ok=false;if(!req.trim()){setView("run");L("Harness Gate Check","拒絕：請先在輸入框填寫需求");return false}setBusy(true);setView("run");
+  try{const out=await call("Planner","需求：\n"+req+"\n請輸出 JSON 陣列。");L("Model Proposes",out);
+    const m=out.match(/\[[\s\S]*\]/);const arr=JSON.parse(m?m[0]:out);const n=SR.current.features.length;
+    setS(s=>({...s,files:{...s.files,spec:s.files.spec+"\n\n## 新需求\n"+req},features:[...s.features,...arr.map((x,i)=>({id:"F-"+String(n+i).padStart(3,"0"),title:x.title,acceptance:x.acceptance||"",status:"not_started",steps:0}))]}));
+    L("Harness Gate Check","通過：已加入 "+arr.length+" 張票，皆為 not_started（Planner 無權啟動）");ok=true}
+  catch(e){L("Harness Gate Check","拒絕：Planner 輸出無法解析為 JSON（"+e.message+"）")}
+  setBusy(false);setSess(x=>({...x,role:"idle"}));return ok}
+async function runBuilder(){
+  if(busy)return false;setView("run");let f=SR.current.features.find(x=>x.status==="active");
+  if(!f){const n=SR.current.features.find(x=>x.status==="not_started");if(!n){L("Harness Gate Check","拒絕：沒有可領取的任務");return false}if(!start(n.id))return false;f=n}
+  if((f.steps||0)>=CAP){L("Harness Gate Check","熔斷：步數已達 "+CAP+"，請先交接");return false}
+  setBusy(true);const t0=Date.now();
+  const rev=f.evalReport&&f.builderOut;
+  const out=await call("Builder",(rev?"請根據 QA 報告修正任務：":"請實作任務：")+f.title+"\n驗收條件："+f.acceptance+(rev?"\n\n你上一版的產出：\n"+f.builderOut+"\n\nQA 報告（未通過）：\n"+f.evalReport+"\n\n請逐條修正上述問題，輸出完整的修正後版本。":""));if(!out||!out.trim()){L("Harness Gate Check","拒絕：Builder 回傳空內容，未計入步數。可能是模型過載或思考用盡輸出額度，請重試，或到設定調低 Builder 的思考程度");setBusy(false);setSess(x=>({...x,role:"idle"}));return false}
+  L("Model Proposes",out);
+  patch(f.id,{steps:(f.steps||0)+1,builderOut:out,evalReport:null,tokens:(f.tokens||0)+tok.current,ms:(f.ms||0)+Date.now()-t0});
+  L("Harness Gate Check","Builder 無權標記 passing，請交由 Evaluator 驗收");setBusy(false);setSess(x=>({...x,role:"idle"}));return true}
+async function runEval(){
+  if(busy)return false;setView("run");const f=SR.current.features.find(x=>x.status==="active");
+  if(!f||!f.builderOut){L("Harness Gate Check","拒絕：需要有 Builder 產出的 active 任務才能驗收");return false}
+  if((f.steps||0)>=CAP){L("Harness Gate Check","熔斷：步數已達上限，請先交接");return false}
+  setBusy(true);const t0=Date.now();
+  const out=await call("Evaluator","請嚴格驗收任務："+f.title+"\n驗收條件："+f.acceptance+"\n\nBuilder 產出：\n"+f.builderOut);
+  if(!out||!out.trim()){L("Harness Gate Check","拒絕：Evaluator 回傳空內容，未形成驗收結論，請重試");setBusy(false);setSess(x=>({...x,role:"idle"}));return false}
+  L("QA Verification",out);const ev={steps:(f.steps||0)+1,evalReport:out,tokens:(f.tokens||0)+tok.current,ms:(f.ms||0)+Date.now()-t0};
+  const pass=/^\s*VERDICT:\s*PASS/i.test(out);const okp=pass&&!simFlag.current;if(okp){patch(f.id,{...ev,status:"passing"});addProgress("## "+new Date().toLocaleString()+"\n- "+f.id+" "+f.title+" → PASS（steps "+ev.steps+"）");L("Harness Gate Check","通過：Evaluator 回傳 PASS，任務轉為 passing 並追加 progress.md，WIP 鎖定解除")}
+  else{patch(f.id,ev);L("Harness Gate Check",pass?"拒絕：驗收階段 API 失敗，結果為模擬回退，不得放行，維持 active。請檢查 API 後重新驗收":"拒絕：Evaluator 回傳 FAIL，維持 active，請再執行 Builder 修正")}
+  setBusy(false);setSess(x=>({...x,role:"idle"}));return okp}
+async function runAll(){
+  if(busy||auto)return;setAuto(true);setView("run");
+  L("Harness Gate Check","一鍵流程開始：Planner → Builder → Evaluator");
+  let ok=true;
+  if(SR.current.features.some(f=>f.status==="active"))L("Harness Gate Check","略過 Planner：已有 active 任務，直接接續 Builder");
+  else{setAutoStep("Planner");ok=await runPlanner();await sleep(150)}
+  if(ok){setAutoStep("Builder");ok=await runBuilder();await sleep(150)}
+  if(ok){setAutoStep("Evaluator");const r=await runEval();L("Harness Gate Check",r?"一鍵流程完成：任務已通過驗收":"一鍵流程停止：驗收未通過，請查看 QA 報告，修正後再按 2 與 3")}
+  else L("Harness Gate Check","一鍵流程中止：前一步未成功");
+  setAuto(false)}
+function handoff(){
+  const a=SR.current.features.find(f=>f.status==="active");
+  addProgress("## 交接 "+new Date().toLocaleString()+"\n- Active："+(a?a.id+" "+a.title+"（steps "+(a.steps||0)+"）":"無")+"\n- 本 Session 估算 tokens："+sess.tokens+"\n- 最後事件："+(log.slice(-2).map(x=>x.tag).join(" → ")||"無")+"\n- 下一步："+(a?"繼續 Builder／Evaluator":"領取下一張票"));
+  if(a)patch(a.id,{steps:0});setLog([]);setSess({role:"idle",tokens:0});L("Harness Gate Check","已寫入交接日誌，Context 清空，新 Session 開始")}
+function saveRaw(){
+  try{const a=JSON.parse(raw);if(!Array.isArray(a))throw new Error("必須是陣列");
+    if(a.filter(f=>f.status==="active").length>1)throw new Error("違反 WIP=1：超過 1 個 active");
+    const old=Object.fromEntries(SR.current.features.map(f=>[f.id,f.status]));
+    const bad=a.find(f=>f.status==="passing"&&old[f.id]!=="passing");if(bad)throw new Error(bad.id+" 不能手動改為 passing，必須經 Evaluator");
+    setS(s=>({...s,features:a}));L("Harness Gate Check","通過：Raw JSON 已通過護欄並儲存")}
+  catch(e){L("Harness Gate Check","拒絕儲存："+e.message)}}
+function resetProject(){
+  if(!window.confirm("清空所有任務、規格與進度？API 設定會保留。"))return;
+  setS(s=>({...s,files:JSON.parse(JSON.stringify(DEF.files)),features:[]}));setLog([]);setSess({role:"idle",tokens:0})}
+function doExport(){setMtext(JSON.stringify({files:S.files,features:S.features,cfg:{...S.cfg,providers:{...S.cfg.providers,gemini:{key:""}}}},null,2));setModal("export")}
+function doImport(){try{const j=JSON.parse(mtext);if(!j.files||!Array.isArray(j.features))throw new Error("格式不符");if(j.features.filter(f=>f.status==="active").length>1)throw new Error("違反 WIP=1");
+  setS(s=>({files:j.files,features:j.features,cfg:j.cfg?{...j.cfg,providers:{...j.cfg.providers,gemini:s.cfg.providers.gemini}}:s.cfg}));setModal(null);L("Harness Gate Check","通過：已匯入狀態")}catch(e){alert("匯入失敗："+e.message)}}
 
-    .score-badge {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
+const outText=f=>"# "+f.id+" "+f.title+"\n\n驗收條件："+f.acceptance+"\n\n## Builder 產出\n\n"+f.builderOut+(f.evalReport?"\n\n## QA 報告\n\n"+f.evalReport:"")+"\n";
+async function copyOut(f){
+  try{await navigator.clipboard.writeText(outText(f));L("Harness Gate Check","通過：已複製 "+f.id+" 的產出到剪貼簿")}
+  catch(e){setMtext(outText(f));setModal("export");L("Harness Gate Check","警告：無法直接寫入剪貼簿，已開啟視窗，請手動全選複製")}}
+function dlOut(f){
+  try{const u=URL.createObjectURL(new Blob([outText(f)],{type:"text/markdown;charset=utf-8"}));const a=document.createElement("a");a.href=u;a.download=f.id+".md";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1500);L("Harness Gate Check","通過：已下載 "+f.id+".md")}
+  catch(e){setMtext(outText(f));setModal("export");L("Harness Gate Check","警告：無法下載，已開啟視窗，請手動複製")}}
+const pct=Math.min(100,((act&&act.steps||0)/CAP)*100);
+const stage=!act?-1:!act.builderOut?0:!act.evalReport?1:2;
+const fail=stage===2;
+const roleName=sess.role==="idle"?"Idle":sess.role==="Evaluator"?"Evaluator · Skeptical":sess.role;
+const Btn=({n,t,s,c,fn})=><button disabled={busy||auto} onClick={fn} className={"text-left rounded-xl px-3 py-2.5 border border-[#27272a] bg-[#111113] active:bg-[#18181b] disabled:opacity-40 "}><div className="flex items-center gap-2"><span className={"mono text-[11px] w-5 h-5 rounded-md flex items-center justify-center "+c}>{n}</span><span className="text-[13px] font-medium">{t}</span></div><div className="text-[11px] text-zinc-500 mt-0.5 pl-7 truncate">{s}</div></button>;
+const Seg=({k,t})=><button onClick={()=>setView(k)} className={"px-4 py-1.5 rounded-md text-[13px] "+(view===k?"bg-[#27272a] text-zinc-100":"text-zinc-400")}>{t}</button>;
+const fcard=f=><div key={f.id} className={card+" p-3 space-y-2"}>
+  <div className="flex items-center gap-2"><span className={"w-1.5 h-1.5 rounded-full "+DOT[f.status]}/><span className="mono text-[11px] text-zinc-400">{f.id}</span></div>
+  <div className="text-[13px] leading-snug">{f.title}</div>
+  <div className="text-[12px] text-zinc-500 leading-snug">{f.acceptance}</div>
+  <div className="mono text-[11px] text-zinc-500">{f.steps||0} 步 · ~{f.tokens||0} tok · {Math.round((f.ms||0)/1000)}s</div>
+  <div className="flex gap-2">
+   {f.status==="not_started"&&<button disabled={!!act} onClick={()=>start(f.id)} className="px-3 py-1.5 rounded-lg text-[12px] bg-indigo-500 text-white disabled:bg-[#18181b] disabled:text-zinc-600">{act?"WIP 鎖定":"啟動"}</button>}
+   {(f.status==="active"||f.status==="not_started")&&<button onClick={()=>patch(f.id,{status:"blocked"})} className="px-3 py-1.5 rounded-lg text-[12px] border border-[#27272a] text-zinc-300">封鎖</button>}
+   {f.status==="blocked"&&<button onClick={()=>patch(f.id,{status:"not_started"})} className="px-3 py-1.5 rounded-lg text-[12px] border border-[#27272a] text-zinc-300">解除封鎖</button>}</div>
+  {f.builderOut&&<div className="flex gap-2"><button onClick={()=>copyOut(f)} className="px-3 py-1.5 rounded-lg text-[12px] border border-[#27272a] text-zinc-300">複製產出</button><button onClick={()=>dlOut(f)} className="px-3 py-1.5 rounded-lg text-[12px] border border-[#27272a] text-zinc-300">下載成檔案</button></div>}</div>;
 
-    .score-value {
-      color: #38bdf8;
-      font-variant-numeric: tabular-nums;
-      font-weight: 700;
-      font-size: 1.25rem;
-    }
-
-    /* 畫布包裝容器：保持正方形並確保在 iPad 橫/豎屏自動等比縮放 */
-    #canvas-wrapper {
-      position: relative;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      flex: 1;
-      width: 100%;
-      max-width: min(85vw, 55vh);
-      max-height: min(85vw, 55vh);
-      margin: 10px auto;
-    }
-
-    /* 遊戲 Canvas：400x400 內部解析度，CSS 伸縮自適應 */
-    #game-canvas {
-      width: 100%;
-      height: 100%;
-      aspect-ratio: 1 / 1;
-      background-color: #020617;
-      border-radius: 12px;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 1px 1px rgba(255, 255, 255, 0.1);
-      display: block;
-    }
-
-    /* 遊戲結束提示浮層 */
-    #game-over-overlay {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(2, 6, 23, 0.85);
-      backdrop-filter: blur(4px);
-      border-radius: 12px;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      gap: 12px;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 0.2s ease;
-    }
-
-    #game-over-overlay.visible {
-      opacity: 1;
-      pointer-events: auto;
-    }
-
-    .overlay-title {
-      font-size: 1.8rem;
-      font-weight: 800;
-      color: #ef4444;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
-
-    .overlay-desc {
-      font-size: 0.95rem;
-      color: #94a3b8;
-    }
-
-    /* 底部控制區域：放置操作按鈕與虛擬方向鍵 */
-    #controls-container {
-      width: 100%;
-      max-width: 440px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 10px;
-    }
-
-    /* 輔助按鈕列（開始 / 重新開始） */
-    .action-row {
-      display: flex;
-      justify-content: center;
-      width: 100%;
-    }
-
-    .action-btn {
-      background: linear-gradient(135deg, #2563eb, #1d4ed8);
-      color: #ffffff;
-      border: none;
-      outline: none;
-      padding: 10px 24px;
-      font-size: 1rem;
-      font-weight: 600;
-      border-radius: 20px;
-      cursor: pointer;
-      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
-      transition: transform 0.1s ease, filter 0.1s ease;
-    }
-
-    .action-btn:active {
-      transform: scale(0.96);
-      filter: brightness(0.9);
-    }
-
-    /* 虛擬十字鍵 (D-Pad) 3x3 Grid 佈局 */
-    .d-pad {
-      display: grid;
-      grid-template-columns: repeat(3, 72px);
-      grid-template-rows: repeat(3, 64px);
-      gap: 8px;
-      justify-content: center;
-      align-items: center;
-      margin-bottom: 4px;
-    }
-
-    /* 方向鍵按鈕通用外觀：適合 iPad 大拇指觸控 */
-    .d-btn {
-      background: #1e293b;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 16px;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      font-size: 1.5rem;
-      color: #f1f5f9;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
-      cursor: pointer;
-      touch-action: none;
-      transition: transform 0.08s ease, background-color 0.08s ease;
-    }
-
-    /* 觸控按下回饋 */
-    .d-btn:active, .d-btn.active-touch {
-      background-color: #334155;
-      transform: scale(0.92);
-      border-color: #38bdf8;
-    }
-
-    /* D-Pad 按鍵位置分佈 */
-    #btn-up    { grid-column: 2; grid-row: 1; }
-    #btn-left  { grid-column: 1; grid-row: 2; }
-    #btn-center{ grid-column: 2; grid-row: 2; background: transparent; border: none; box-shadow: none; pointer-events: none; }
-    #btn-right { grid-column: 3; grid-row: 2; }
-    #btn-down  { grid-column: 2; grid-row: 3; }
-  </style>
-</head>
-<body>
-
-  <div id="app-container">
-    <!-- 頂部分數欄 -->
-    <header>
-      <div class="score-badge">分數: <span id="current-score" class="score-value">0</span></div>
-      <div class="score-badge">最高紀錄: <span id="high-score" class="score-value">0</span></div>
-    </header>
-
-    <!-- 遊戲畫布與結束覆蓋層 -->
-    <div id="canvas-wrapper">
-      <canvas id="game-canvas" width="400" height="400"></canvas>
-      <div id="game-over-overlay">
-        <div class="overlay-title">遊戲結束</div>
-        <div class="overlay-desc">點擊下方按鈕或按空格鍵重試</div>
-      </div>
-    </div>
-
-    <!-- 底部觸控控制器 -->
-    <div id="controls-container">
-      <div class="action-row">
-        <button id="btn-restart" class="action-btn">開始遊戲</button>
-      </div>
-
-      <!-- 虛擬方向鍵 D-Pad -->
-      <div class="d-pad">
-        <button id="btn-up" class="d-btn" aria-label="上">▲</button>
-        <button id="btn-left" class="d-btn" aria-label="左">◀</button>
-        <div id="btn-center"></div>
-        <button id="btn-right" class="d-btn" aria-label="右">▶</button>
-        <button id="btn-down" class="d-btn" aria-label="下">▼</button>
-      </div>
-    </div>
+return <div className="h-full relative flex text-[13px]">
+<aside className="w-48 shrink-0 border-r border-[#1f1f23] flex flex-col bg-[#0c0c0e]">
+ <div className="px-4 pt-4 pb-3"><div className="font-semibold tracking-tight text-[15px]">Harness</div><div className={lbl+" mt-0.5"}>System of record</div></div>
+ <nav className="flex-1 overflow-auto px-2 space-y-0.5">{FILES.map(([k,n])=><button key={k} onClick={()=>{setTab(k);setView("files")}} className={"w-full text-left px-3 py-2.5 rounded-lg flex items-center "+(view==="files"&&tab===k?"bg-[#18181b] text-zinc-100":"text-zinc-400")}><span className="mono text-[12px] truncate">{n}</span>{k==="feature_list"&&<span className="ml-auto mono text-[11px] text-zinc-500">{S.features.filter(f=>f.status==="passing").length}/{S.features.length}</span>}</button>)}</nav>
+ <div className="p-2 space-y-1.5 border-t border-[#1f1f23]"><button onClick={doExport} className="w-full py-2 rounded-lg border border-[#27272a] text-zinc-300">匯出同步包</button><button onClick={()=>{setMtext("");setModal("import")}} className="w-full py-2 rounded-lg border border-[#27272a] text-zinc-300">匯入桌面版狀態</button><button onClick={resetProject} className="w-full py-2 rounded-lg border border-[#27272a] text-rose-300">清空專案</button></div>
+</aside>
+<main className="flex-1 min-w-0 flex flex-col">
+ <header className="px-4 py-3 border-b border-[#1f1f23] flex items-center gap-3">
+  <div className="flex bg-[#111113] border border-[#1f1f23] rounded-lg p-0.5"><Seg k="run" t="執行"/><Seg k="board" t="看板"/><Seg k="files" t="檔案"/></div>
+  <div className="flex items-center gap-2 min-w-0"><span className={"w-1.5 h-1.5 rounded-full "+(sess.role==="idle"?"bg-zinc-500":sess.role==="Evaluator"?"bg-rose-400":sess.role==="Builder"?"bg-indigo-400":"bg-violet-400")}/><span className="text-zinc-300 truncate">{roleName}</span></div>
+  <span className="ml-auto mono text-[11px] text-zinc-500">~{sess.tokens} tok</span>
+  <button onClick={()=>setRight(!right)} className="px-3 py-1.5 rounded-lg border border-[#27272a] text-zinc-300">設定</button>
+ </header>
+ <div className="flex-1 min-h-0 overflow-auto">
+ {view==="run"&&<div className="p-4 space-y-4 max-w-4xl">
+  <div className={card+" p-4 space-y-3"}>
+   <div className="flex items-baseline gap-2"><span className={lbl}>Active</span><span className="truncate">{act?<><span className="mono text-zinc-400">{act.id}</span> {act.title}</>:<span className="text-zinc-500">無（WIP 0/1）</span>}</span><span className="ml-auto mono text-[11px] text-zinc-500">{act&&act.steps||0}/{CAP}</span></div>
+   <div className="h-1 rounded bg-[#1f1f23]"><div className={"h-1 rounded "+(pct>80?"bg-rose-400":"bg-indigo-400")} style={{width:pct+"%"}}/></div>
+   <div className="flex items-center">{STAGES.map((s,i)=><React.Fragment key={s}><div className="flex items-center gap-1.5"><span className={"w-2 h-2 rounded-full "+(i<stage?"bg-emerald-400":i===stage?(fail?"bg-rose-400":"bg-indigo-400"):"bg-[#27272a]")}/><span className={"text-[12px] "+(i<=stage?"text-zinc-200":"text-zinc-600")}>{s}{i===2&&fail?"未過":""}</span></div>{i<3&&<div className={"flex-1 h-px mx-2 "+(i<stage?"bg-emerald-400/50":"bg-[#27272a]")}/>}</React.Fragment>)}</div>
   </div>
-
-  <script>
-    /**
-     * iPad 貪食蛇遊戲核心邏輯
-     */
-    // 1. 遊戲核心常數設定
-    const GRID_SIZE = 20;               // 每個網格邏輯像素大小 (20x20)
-    const TILE_COUNT = 20;              // 寬度與高度網格數 (20 * 20 = 400 像素解析度)
-    const GAME_STEP_INTERVAL = 100;     // 蛇移動頻率：每 100 毫秒執行一次更新
-
-    // 2. DOM 元素參考
-    const canvas = document.getElementById('game-canvas');
-    const ctx = canvas.getContext('2d');
-    const currentScoreEl = document.getElementById('current-score');
-    const highScoreEl = document.getElementById('high-score');
-    const restartBtn = document.getElementById('btn-restart');
-    const gameOverOverlay = document.getElementById('game-over-overlay');
-
-    const btnUp = document.getElementById('btn-up');
-    const btnDown = document.getElementById('btn-down');
-    const btnLeft = document.getElementById('btn-left');
-    const btnRight = document.getElementById('btn-right');
-
-    // 3. 遊戲狀態變數
-    let snake = [];                     // 蛇身陣列，index 0 為蛇頭 [{x, y}, ...]
-    let food = { x: 0, y: 0 };          // 食物座標
-    let currentDir = { x: 0, y: 0 };    // 當前實際前進方向向量
-    let nextDir = { x: 0, y: 0 };       // 緩衝區中的下一次轉向向量（防自殺機制）
-    let score = 0;
-    let highScore = 0;
-    let isGameOver = false;
-    let isGameRunning = false;
-    let lastStepTime = 0;
-    let animationFrameId = null;
-
-    /**
-     * 重設與初始化遊戲狀態
-     */
-    function initGame() {
-      // 初始蛇身長度為 3，置中並朝右移動
-      snake = [
-        { x: 10, y: 10 },
-        { x: 9, y: 10 },
-        { x: 8, y: 10 }
-      ];
-      currentDir = { x: 1, y: 0 };
-      nextDir = { x: 1, y: 0 };
-      score = 0;
-      isGameOver = false;
-      isGameRunning = true;
-      currentScoreEl.textContent = '0';
-      gameOverOverlay.classList.remove('visible');
-      restartBtn.textContent = '重新開始';
-
-      spawnFood();
-      lastStepTime = performance.now();
-
-      if (!animationFrameId) {
-        animationFrameId = requestAnimationFrame(gameLoop);
-      }
-    }
-
-    /**
-     * 生成隨機食物，確保不與當前蛇身重疊
-     */
-    function spawnFood() {
-      let valid = false;
-      let newFood = { x: 0, y: 0 };
-      while (!valid) {
-        newFood.x = Math.floor(Math.random() * TILE_COUNT);
-        newFood.y = Math.floor(Math.random() * TILE_COUNT);
-        // 檢查是否與任何一段蛇身相撞
-        valid = !snake.some(segment => segment.x === newFood.x && segment.y === newFood.y);
-      }
-      food = newFood;
-    }
-
-    /**
-     * 安全轉向設定（防自殺與同一禎連續快速轉向機制）
-     * 當蛇向右走時，禁止直接按左自殺；必須轉為上下方。
-     */
-    function setDirection(dx, dy) {
-      if (!isGameRunning || isGameOver) return;
-      // 避免反向逆行碰撞
-      if (dx !== 0 && currentDir.x === -dx) return;
-      if (dy !== 0 && currentDir.y === -dy) return;
-      // 避免同一禎內連續觸發無效方向
-      if (dx !== 0 && currentDir.x !== 0) return;
-      if (dy !== 0 && currentDir.y !== 0) return;
-
-      nextDir = { x: dx, y: dy };
-    }
-
-    /**
-     * 貪食蛇單步邏輯更新
-     */
-    function update() {
-      if (isGameOver || !isGameRunning) return;
-
-      // 採納緩衝區方向
-      currentDir = { ...nextDir };
-
-      // 計算蛇頭新位置
-      const newHead = {
-        x: snake[0].x + currentDir.x,
-        y: snake[0].y + currentDir.y
-      };
-
-      // 撞牆判定 (400x400 / 20 = 邊界 0 到 19)
-      if (newHead.x < 0 || newHead.x >= TILE_COUNT || newHead.y < 0 || newHead.y >= TILE_COUNT) {
-        handleGameOver();
-        return;
-      }
-
-      // 撞擊自身身體判定
-      const hitSelf = snake.some(segment => segment.x === newHead.x && segment.y === newHead.y);
-      if (hitSelf) {
-        handleGameOver();
-        return;
-      }
-
-      // 蛇頭往前推進
-      snake.unshift(newHead);
-
-      // 判定是否吃到食物
-      if (newHead.x === food.x && newHead.y === food.y) {
-        score += 10;
-        currentScoreEl.textContent = score;
-        if (score > highScore) {
-          highScore = score;
-          highScoreEl.textContent = highScore;
-        }
-        spawnFood();
-        // 吃到食物不 pop，蛇身長度加 1
-      } else {
-        // 未吃到食物則移除蛇尾維持原長度
-        snake.pop();
-      }
-    }
-
-    /**
-     * 遊戲結束處理
-     */
-    function handleGameOver() {
-      isGameOver = true;
-      isGameRunning = false;
-      gameOverOverlay.classList.add('visible');
-      restartBtn.textContent = '再來一局';
-    }
-
-    /**
-     * 渲染繪製畫面（暗色系風格、留 1px 格隙、食物圓形光澤感）
-     */
-    function render() {
-      // 1. 清空畫布並繪製深色背景
-      ctx.fillStyle = '#020617';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      // 2. 繪製微弱的背景格線（提升視覺科技精緻度）
-      ctx.strokeStyle = '#0f172a';
-      ctx.lineWidth = 1;
-      for (let i = 0; i <= TILE_COUNT; i++) {
-        ctx.beginPath();
-        ctx.moveTo(i * GRID_SIZE, 0);
-        ctx.lineTo(i * GRID_SIZE, canvas.height);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(0, i * GRID_SIZE);
-        ctx.lineTo(canvas.width, i * GRID_SIZE);
-        ctx.stroke();
-      }
-
-      // 3. 繪製食物（高對比亮紅色圓形並保留邊界隙縫）
-      const foodCenterX = food.x * GRID_SIZE + GRID_SIZE / 2;
-      const foodCenterY = food.y * GRID_SIZE + GRID_SIZE / 2;
-      const foodRadius = (GRID_SIZE - 2) / 2;
-
-      ctx.fillStyle = '#ef4444';
-      ctx.beginPath();
-      ctx.arc(foodCenterX, foodCenterY, foodRadius, 0, Math.PI * 2);
-      ctx.fill();
-
-      // 4. 繪製蛇身（蛇頭為亮翠綠，蛇身為健康綠色，留 1 像素隙縫）
-      snake.forEach((segment, index) => {
-        const isHead = index === 0;
-        ctx.fillStyle = isHead ? '#10b981' : '#22c55e';
-
-        // 每個網格保留 1px 間隔以體現復古網格質感
-        const x = segment.x * GRID_SIZE + 1;
-        const y = segment.y * GRID_SIZE + 1;
-        const size = GRID_SIZE - 2;
-
-        ctx.fillRect(x, y, size, size);
-
-        // 為蛇頭繪製雙眼，增強朝向辨識度
-        if (isHead) {
-          ctx.fillStyle = '#022c22';
-          const eyeSize = 2.5;
-          let eye1 = { x: x + 4, y: y + 4 };
-          let eye2 = { x: x + 12, y: y + 4 };
-
-          if (currentDir.x === 1) { // 向右
-            eye1 = { x: x + 12, y: y + 4 };
-            eye2 = { x: x + 12, y: y + 12 };
-          } else if (currentDir.x === -1) { // 向左
-            eye1 = { x: x + 4, y: y + 4 };
-            eye2 = { x: x + 4, y: y + 12 };
-          } else if (currentDir.y === 1) { // 向下
-            eye1 = { x: x + 4, y: y + 12 };
-            eye2 = { x: x + 12, y: y + 12 };
-          }
-          ctx.fillRect(eye1.x, eye1.y, eyeSize, eyeSize);
-          ctx.fillRect(eye2.x, eye2.y, eyeSize, eyeSize);
-        }
-      });
-    }
-
-    /**
-     * 高精度 Game Loop（基於 requestAnimationFrame 與 100ms 節拍）
-     */
-    function gameLoop(timestamp) {
-      if (!lastStepTime) lastStepTime = timestamp;
-      const elapsed = timestamp - lastStepTime;
-
-      if (elapsed >= GAME_STEP_INTERVAL) {
-        lastStepTime = timestamp - (elapsed % GAME_STEP_INTERVAL);
-        update();
-      }
-
-      render();
-      animationFrameId = requestAnimationFrame(gameLoop);
-    }
-
-    /**
-     * 核心關鍵：綁定無延遲觸控與按鍵點擊
-     * iPad iOS Safari 必須使用 touchstart 且呼叫 e.preventDefault()，杜絕點擊延遲與頁面縮放
-     */
-    function bindInstantTouch(element, callback) {
-      // 觸控事件優先
-      element.addEventListener('touchstart', (e) => {
-        e.preventDefault(); // 杜絕 iOS 雙擊放大與文字選取
-        element.classList.add('active-touch');
-        callback();
-      }, { passive: false });
-
-      element.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        element.classList.remove('active-touch');
-      }, { passive: false });
-
-      element.addEventListener('touchcancel', () => {
-        element.classList.remove('active-touch');
-      });
-
-      // 支援桌面滑鼠點擊
-      element.addEventListener('click', (e) => {
-        callback();
-      });
-    }
-
-    // 綁定虛擬方向鍵（上、下、左、右）
-    bindInstantTouch(btnUp, () => setDirection(0, -1));
-    bindInstantTouch(btnDown, () => setDirection(0, 1));
-    bindInstantTouch(btnLeft, () => setDirection(-1, 0));
-    bindInstantTouch(btnRight, () => setDirection(1, 0));
-
-    // 綁定重新開始按鈕
-    bindInstantTouch(restartBtn, () => {
-      initGame();
-    });
-
-    // 支援實體鍵盤（方向鍵與 WASD 及空格鍵重開），方便除錯與外接鍵盤體驗
-    window.addEventListener('keydown', (e) => {
-      switch (e.key) {
-        case 'ArrowUp':
-        case 'w':
-        case 'W':
-          e.preventDefault();
-          setDirection(0, -1);
-          break;
-        case 'ArrowDown':
-        case 's':
-        case 'S':
-          e.preventDefault();
-          setDirection(0, 1);
-          break;
-        case 'ArrowLeft':
-        case 'a':
-        case 'A':
-          e.preventDefault();
-          setDirection(-1, 0);
-          break;
-        case 'ArrowRight':
-        case 'd':
-        case 'D':
-          e.preventDefault();
-          setDirection(1, 0);
-          break;
-        case ' ': // 空格鍵直接重新開始
-          e.preventDefault();
-          initGame();
-          break;
-      }
-    });
-
-    // 防止 iPad 雙指手勢或滾動拖曳
-    document.addEventListener('gesturestart', (e) => e.preventDefault());
-    document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
-
-    // 頁面載入後自動啟動初始狀態
-    initGame();
-  </script>
-</body>
-</html>
+  <div className="space-y-3">
+   {log.length===0&&<div className="text-zinc-500 py-8 text-center">執行紀錄會顯示在這裡。依序執行下方 1、2、3。</div>}
+   {log.map((e,i)=><div key={i} className="flex gap-3"><span className={"mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 "+(TAGDOT[e.tag]||"bg-zinc-500")}/><div className="min-w-0"><div className={lbl}>{e.tag}</div><pre className="whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-zinc-300 mt-0.5" style={{fontFamily:"inherit"}}>{e.text}</pre></div></div>)}
+   {busy&&<div className="text-zinc-500 animate-pulse pl-5">處理中…</div>}<div ref={endRef}/></div>
+ </div>}
+ {view==="board"&&<div className="p-4 grid grid-cols-4 gap-3 items-start min-w-[760px]">{COLS.map(([k,n])=><div key={k} className="space-y-2">
+   <div className="flex items-center gap-2 px-1"><span className={"w-1.5 h-1.5 rounded-full "+DOT[k]}/><span className={lbl}>{n}</span><span className="mono text-[11px] text-zinc-600">{S.features.filter(f=>f.status===k).length}{k==="active"?"/1":""}</span></div>
+   {S.features.filter(f=>f.status===k).map(fcard)}</div>)}</div>}
+ {view==="files"&&<div className="p-4 h-full flex flex-col gap-2"><div className="flex items-center"><span className="mono text-[12px] text-zinc-400">{FILES.find(f=>f[0]===tab)[1]}</span>{tab==="feature_list"&&<button onClick={saveRaw} className="ml-auto px-3 py-1.5 rounded-lg bg-indigo-500 text-white">儲存（經護欄驗證）</button>}</div>
+  {tab==="feature_list"?<textarea value={raw} onChange={e=>setRaw(e.target.value)} className={inp+" flex-1 mono text-[12px] leading-relaxed"}/>:<textarea value={S.files[tab]} onChange={e=>setFiles(tab,e.target.value)} className={inp+" flex-1 mono text-[12px] leading-relaxed"}/>}</div>}
+ </div>
+ <footer className="p-3 border-t border-[#1f1f23] space-y-2">
+  <div className="flex gap-2"><input value={req} onChange={e=>setReq(e.target.value)} className={inp} placeholder="輸入需求（給 Planner）"/><button disabled={busy||auto} onClick={runAll} className="shrink-0 pl-4 pr-5 py-2.5 rounded-xl text-white font-medium disabled:opacity-70 flex items-center gap-2.5 border border-indigo-300/30 active:scale-[0.98] transition" style={{background:"linear-gradient(180deg,#6366f1,#4f46e5)",boxShadow:"0 8px 24px -10px rgba(99,102,241,.7), inset 0 1px 0 rgba(255,255,255,.18)"}}>{auto?<span className="w-2 h-2 rounded-full bg-white animate-pulse"/>:<svg width="12" height="12" viewBox="0 0 12 12"><path d="M2.5 1.2v9.6L10.8 6z" fill="currentColor"/></svg>}<span className="whitespace-nowrap">{auto?"執行中 · "+autoStep:"任務開始"}</span></button></div>
+  <div className="grid grid-cols-4 gap-2">
+   <Btn n="1" t="Planner" s="拆解需求至 feature_list" c="bg-violet-500/20 text-violet-300" fn={runPlanner}/>
+   <Btn n="2" t="Builder" s="領取並執行唯一 Active 任務" c="bg-indigo-500/20 text-indigo-300" fn={runBuilder}/>
+   <Btn n="3" t="Evaluator" s="挑剔 QA 驗收並過門檻" c="bg-rose-500/20 text-rose-300" fn={runEval}/>
+   <Btn n="4" t="交接" s="寫入 progress.md 並重置 Session" c="bg-zinc-500/20 text-zinc-300" fn={handoff}/></div>
+ </footer>
+</main>
+{right&&<aside className="absolute inset-y-0 right-0 z-40 w-80 max-w-full shadow-2xl border-l border-[#1f1f23] bg-[#0c0c0e] overflow-auto p-4 space-y-5">
+ <div className="flex items-center"><span className="font-semibold">模型路由</span><button onClick={()=>setRight(false)} className="ml-auto px-2 text-zinc-400">關閉</button></div>
+ <div className="flex bg-[#111113] border border-[#1f1f23] rounded-lg p-0.5">{[["standalone","獨立模式"],["bridge","橋接模式"]].map(([k,n])=><button key={k} onClick={()=>setCfg(c=>{c.mode=k;Object.keys(c.roles).forEach(r=>{c.roles[r].provider=k==="bridge"?"subscription_bridge":"gemini_api"})})} className={"flex-1 py-1.5 rounded-md "+(S.cfg.mode===k?"bg-[#27272a] text-zinc-100":"text-zinc-400")}>{n}</button>)}</div>
+ <div className="space-y-2"><div className={lbl}>gemini_api · Key 僅存本機</div><input type="password" placeholder="GEMINI_API_KEY" value={S.cfg.providers.gemini.key} onChange={e=>setCfg(c=>{c.providers.gemini.key=e.target.value})} className={inp}/></div>
+ <div className="space-y-2"><div className={lbl}>openai_compatible</div><input placeholder="base_url" value={S.cfg.providers.openai.url} onChange={e=>setCfg(c=>{c.providers.openai.url=e.target.value})} className={inp}/><input type="password" placeholder="api_key" value={S.cfg.providers.openai.key} onChange={e=>setCfg(c=>{c.providers.openai.key=e.target.value})} className={inp}/></div>
+ <div className="space-y-2"><div className={lbl}>subscription_bridge</div><input placeholder="http://100.x.x.x:8321/v1" value={S.cfg.providers.bridge.url} onChange={e=>setCfg(c=>{c.providers.bridge.url=e.target.value})} className={inp}/><input placeholder='Headers JSON' value={S.cfg.providers.bridge.headers} onChange={e=>setCfg(c=>{c.providers.bridge.headers=e.target.value})} className={inp}/>
+  <label className="flex items-center gap-2 text-zinc-300"><input type="checkbox" checked={S.cfg.providers.bridge.sticky} onChange={e=>setCfg(c=>{c.providers.bridge.sticky=e.target.checked})}/>Sticky Session</label></div>
+ <div className="space-y-2"><div className={lbl}>Role routing</div><datalist id="models"><option value="gemini-2.5-pro"/><option value="gemini-2.5-flash"/></datalist>
+  {["Planner","Builder","Evaluator"].map(r=><div key={r} className={card+" p-2.5 space-y-1.5"}><div className="text-zinc-300">{r}</div>
+   <select value={S.cfg.roles[r].provider} onChange={e=>setCfg(c=>{c.roles[r].provider=e.target.value})} className={inp}><option>gemini_api</option><option>openai_compatible</option><option>subscription_bridge</option></select>
+   <input list="models" value={S.cfg.roles[r].model} onChange={e=>setCfg(c=>{c.roles[r].model=e.target.value})} className={inp+" mono"}/>
+   <div className="flex items-center gap-2 pt-0.5"><span className={lbl+" shrink-0"}>思考程度</span><select value={S.cfg.roles[r].think||""} onChange={e=>setCfg(c=>{c.roles[r].think=e.target.value})} className={inp}><option value="">模型預設</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></div></div>)}</div>
+ <div className="space-y-2"><div className="flex items-center gap-1"><span className={lbl+" mr-auto"}>Context 預覽</span>{["Planner","Builder","Evaluator"].map(r=><button key={r} onClick={()=>setPv(r)} className={"px-2 py-1 rounded-md text-[11px] "+(pv===r?"bg-[#27272a] text-zinc-100":"text-zinc-500")}>{r}</button>)}</div>
+  <pre className={card+" mono text-[11px] whitespace-pre-wrap p-2.5 max-h-72 overflow-auto text-zinc-400"}>{"[System]\n"+SYS[pv]+"\n\n"+ctxText(pv)}</pre></div>
+</aside>}
+{modal&&<div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50"><div className={card+" w-full max-w-xl p-4 space-y-3"}>
+ <div className="font-semibold">{modal==="export"?"匯出同步包（複製後貼到桌面版）":"貼上桌面版狀態 JSON"}</div>
+ <textarea value={mtext} onChange={e=>setMtext(e.target.value)} readOnly={modal==="export"} className={inp+" h-64 mono text-[12px]"}/>
+ <div className="flex gap-2 justify-end"><button onClick={()=>setModal(null)} className="px-4 py-2 rounded-lg border border-[#27272a] text-zinc-300">關閉</button>
+ {modal==="export"?<button onClick={()=>{try{navigator.clipboard.writeText(mtext)}catch(e){}}} className="px-4 py-2 rounded-lg bg-indigo-500 text-white">複製</button>:<button onClick={doImport} className="px-4 py-2 rounded-lg bg-indigo-500 text-white">套用匯入</button>}</div></div></div>}
+</div>}
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script></body></html>
